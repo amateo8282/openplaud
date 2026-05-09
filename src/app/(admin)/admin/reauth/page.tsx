@@ -9,6 +9,13 @@ import { auth } from "@/lib/auth";
 import { env } from "@/lib/env";
 import { ReauthForm } from "./reauth-form";
 
+// Force dynamic rendering. Without this, Next.js may statically prerender
+// this page during `next build` -- and because the IS_HOSTED / ADMIN_EMAILS
+// checks run before any dynamic API (headers/cookies/searchParams), build
+// environments that lack those vars would bake a permanent 404 into the
+// output. Admin config is always runtime, never build-time.
+export const dynamic = "force-dynamic";
+
 /**
  * Password reprompt for the admin dashboard. Reachable only after a regular
  * session is in place; non-admins, self-host, and IP-blocked clients all 404.
