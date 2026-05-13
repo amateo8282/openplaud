@@ -7,6 +7,21 @@ import { requireApiSession } from "@/lib/auth-server";
 import { decryptJsonField, encryptJsonField } from "@/lib/encryption/fields";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 
+// Allowlists for enum-valued settings that the API persists as raw
+// strings. The DB columns are typed `varchar` (not pg enums), so any
+// validation must happen here — otherwise a misbehaving / malicious
+// client could write an arbitrary value that breaks every reader
+// downstream (the UI assumes a closed set of literals).
+const ENUM_FIELDS = {
+    playerScrubber: ["waveform", "slider"],
+    listDensity: ["comfortable", "compact"],
+    theme: ["light", "dark", "system"],
+    dateTimeFormat: ["relative", "absolute", "iso"],
+    recordingListSortOrder: ["newest", "oldest", "name"],
+    transcriptionQuality: ["fast", "balanced", "accurate"],
+    defaultExportFormat: ["json", "csv", "zip"],
+} as const satisfies Record<string, readonly string[]>;
+
 // Default settings values
 const DEFAULT_SETTINGS = {
     autoTranscribe: false,
@@ -18,11 +33,13 @@ const DEFAULT_SETTINGS = {
     defaultPlaybackSpeed: 1.0,
     defaultVolume: 75,
     autoPlayNext: false,
+    playerScrubber: "waveform" as const,
     defaultTranscriptionLanguage: null,
     transcriptionQuality: "balanced" as const,
     dateTimeFormat: "relative" as const,
     recordingListSortOrder: "newest" as const,
     itemsPerPage: 50,
+    listDensity: "comfortable" as const,
     theme: "system" as const,
     autoDeleteRecordings: false,
     retentionDays: null,
@@ -52,11 +69,13 @@ const SETTINGS_FIELDS = [
     "defaultPlaybackSpeed",
     "defaultVolume",
     "autoPlayNext",
+    "playerScrubber",
     "defaultTranscriptionLanguage",
     "transcriptionQuality",
     "dateTimeFormat",
     "recordingListSortOrder",
     "itemsPerPage",
+    "listDensity",
     "theme",
     "autoDeleteRecordings",
     "retentionDays",
@@ -148,6 +167,25 @@ export const PUT = apiHandler(async (request: Request) => {
 
     for (const field of SETTINGS_FIELDS) {
         let value = body[field];
+        // Enum-field validation: reject unknown literals up front so a
+        // bad value never reaches the DB. `undefined` (field omitted)
+        // and `null` (clear) fall through; only present non-null
+        // values are checked.
+        if (
+            field in ENUM_FIELDS &&
+            value !== undefined &&
+            value !== null &&
+            !(ENUM_FIELDS as Record<string, readonly string[]>)[field].includes(
+                value as string,
+            )
+        ) {
+            throw new AppError(
+                ErrorCode.INVALID_INPUT,
+                `Invalid ${field} value`,
+                400,
+                { field },
+            );
+        }
         // Validate aiOutputLanguage against the allowed set. Explicit
         // `null` is allowed (clears the preference → "auto"); any other
         // non-allowlisted value is a client bug and should fail loudly
