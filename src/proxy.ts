@@ -3,7 +3,7 @@ import { type NextRequest, NextResponse } from "next/server";
 /**
  * Two responsibilities:
  *
- * 1. `/api/_int/*` (Rybbit analytics proxy): strip auth-bearing request
+ * 1. `/api/int/*` (Rybbit analytics proxy): strip auth-bearing request
  *    headers so the upstream Rybbit instance never sees app session
  *    cookies or bearer tokens. The browser sends these by default for any
  *    same-origin request; without this middleware, Next's `rewrites()`
@@ -20,7 +20,7 @@ import { type NextRequest, NextResponse } from "next/server";
 export function proxy(request: NextRequest) {
     const { pathname } = request.nextUrl;
 
-    if (pathname.startsWith("/api/_int/")) {
+    if (pathname.startsWith("/api/int/")) {
         const headers = new Headers(request.headers);
         headers.delete("cookie");
         headers.delete("authorization");
@@ -37,5 +37,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-    matcher: ["/api/_int/:path*", "/admin/:path*"],
+    matcher: ["/api/int/:path*", "/admin/:path*"],
 };

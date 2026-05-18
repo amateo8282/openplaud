@@ -4,7 +4,7 @@ import { proxyRybbitGet } from "@/lib/rybbit/proxy";
 //
 // The path segment `script.js` is load-bearing: the Rybbit client
 // derives its `analyticsHost` by running `src.split("/script.js")[0]`.
-// If we serve from `/api/_int/s.js`, that split is a no-op and the
+// If we serve from `/api/int/s.js`, that split is a no-op and the
 // client tries to POST to the literal full src + `/api/track`, which
 // resolves to nonsense. Keep this path as `script.js`.
 

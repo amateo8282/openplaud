@@ -11,6 +11,11 @@ import { env } from "@/lib/env";
 // request time keeps the proxy in lockstep with `<RybbitAnalytics>`'s
 // render gate.
 //
+// Folder name note: routes live under `src/app/api/int/`, NOT `_int/`.
+// App Router treats any folder prefixed with `_` as a private folder
+// and excludes it from the route manifest, so the original `/api/_int/*`
+// paths silently 404'd via the prerendered not-found page in production.
+//
 // Hosted-only. Self-host returns 404 even if an operator happens to set
 // `RYBBIT_HOST`/`RYBBIT_SITE_ID`, matching `<RybbitAnalytics>`'s render
 // gate exactly so the two never disagree. Self-hosters who want their
