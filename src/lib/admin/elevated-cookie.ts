@@ -2,24 +2,12 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { env } from "@/lib/env";
 
 /**
- * Signed elevated-session cookie for the admin dashboard.
+ * Signed elevated-session cookie for the admin dashboard. Format:
+ * `${userId}.${issuedAt}.${HMAC-SHA256(userId.issuedAt, BETTER_AUTH_SECRET)}`.
  *
- * The cookie is set after successful password reprompt (`POST /api/admin/reauth`)
- * and required for any admin route. It carries:
- *   - userId          who was reauthenticated
- *   - issuedAt        unix-ms timestamp of reauth
- *   - mac             HMAC-SHA256 over `${userId}.${issuedAt}` keyed off
- *                     BETTER_AUTH_SECRET
- *
- * The HMAC binds the cookie to this server's secret. A leaked DB row alone
- * cannot forge it (BETTER_AUTH_SECRET is not in the DB); a leaked cookie
- * still expires by `issuedAt + ttl`.
- *
- * Two TTLs are checked at gate time:
- *   - reauth TTL  (env.ADMIN_REAUTH_TTL_MINUTES, default 30)
- *     gates read access; older cookies bounce to /admin/reauth.
- *   - mutation TTL (env.ADMIN_MUTATION_TTL_MINUTES, default 10)
- *     additionally required for any /api/admin/actions/* mutation.
+ * Two TTLs (both env-tunable) are enforced at gate time:
+ *   - `ADMIN_REAUTH_TTL_MINUTES` gates read access.
+ *   - `ADMIN_MUTATION_TTL_MINUTES` additionally required for mutations.
  */
 
 export const ADMIN_ELEVATED_COOKIE = "openplaud_admin_elev";
@@ -30,7 +18,6 @@ interface ElevatedPayload {
 }
 
 function secret(): string {
-    // env validation guarantees BETTER_AUTH_SECRET is present at runtime.
     const s = env.BETTER_AUTH_SECRET;
     if (!s)
         throw new Error(
@@ -51,10 +38,10 @@ export function signElevatedCookie(userId: string, now = Date.now()): string {
 }
 
 /**
- * Verify the cookie's structure + HMAC. Returns the payload on success or
- * null on any failure (malformed, bad MAC, wrong shape). Expiry is checked
- * separately by the gate so it can distinguish "expired -> reauth" from
- * "tampered -> 404".
+ * Verify the cookie's structure + HMAC. Returns the payload on success,
+ * or `null` on any structural / MAC failure. Expiry is checked
+ * separately so the gate can distinguish expired (reauth) from
+ * tampered (404).
  */
 export function verifyElevatedCookie(
     raw: string | undefined | null,

@@ -1,48 +1,20 @@
-/**
- * Sync configuration for OpenPlaud
- *
- * Environment variables (for self-hosted deployments):
- * - NEXT_PUBLIC_SYNC_INTERVAL: Default sync interval in milliseconds (default: 300000 = 5 minutes)
- * - NEXT_PUBLIC_MIN_SYNC_INTERVAL: Minimum time between syncs in milliseconds (default: 60000 = 1 minute)
- * - NEXT_PUBLIC_SYNC_ON_MOUNT: Whether to sync on app mount (default: true)
- * - NEXT_PUBLIC_SYNC_ON_VISIBILITY: Whether to sync when tab becomes visible (default: true)
- */
-
 export const SYNC_CONFIG = {
-    /**
-     * Default sync interval in milliseconds
-     * @default 300000 (5 minutes)
-     */
+    /** Default sync interval in ms (env: `NEXT_PUBLIC_SYNC_INTERVAL`). */
     defaultInterval: parseInt(
         process.env.NEXT_PUBLIC_SYNC_INTERVAL || "300000",
         10,
     ),
-
-    /**
-     * Minimum time between syncs in milliseconds
-     * @default 60000 (1 minute)
-     */
+    /** Minimum interval between syncs in ms (env: `NEXT_PUBLIC_MIN_SYNC_INTERVAL`). */
     minInterval: parseInt(
         process.env.NEXT_PUBLIC_MIN_SYNC_INTERVAL || "60000",
         10,
     ),
-
-    /**
-     * Whether to sync on mount
-     * @default true
-     */
+    /** Sync on app mount (env: `NEXT_PUBLIC_SYNC_ON_MOUNT`). */
     syncOnMount: process.env.NEXT_PUBLIC_SYNC_ON_MOUNT !== "false",
-
-    /**
-     * Whether to sync when tab becomes visible
-     * @default true
-     */
+    /** Sync when tab becomes visible (env: `NEXT_PUBLIC_SYNC_ON_VISIBILITY`). */
     syncOnVisibilityChange:
         process.env.NEXT_PUBLIC_SYNC_ON_VISIBILITY !== "false",
-
-    /**
-     * Available sync interval presets (in milliseconds)
-     */
+    /** Interval presets surfaced in the settings dropdown (ms). */
     intervalPresets: {
         "1 minute": 60 * 1000,
         "2 minutes": 2 * 60 * 1000,
@@ -55,8 +27,8 @@ export const SYNC_CONFIG = {
 } as const;
 
 /**
- * Get sync settings from database via API
- * Falls back to localStorage for backwards compatibility during migration
+ * Fetch sync settings via `/api/settings/user`. Falls back to
+ * localStorage for backwards compatibility with pre-DB-settings rows.
  */
 export async function getSyncSettings(): Promise<{
     syncInterval: number;

@@ -1,25 +1,17 @@
 /**
- * Standardized error envelope for every API route.
- *
- * Wire shape (the contract clients depend on):
+ * Standardised error envelope returned by every API route:
  *
  *     { "error": "human message", "code": "MACHINE_READABLE", "details"?: {...} }
  *
- *  - `error`   — human-readable, safe to display, never contains stack
- *                traces, secrets, DB internals, or upstream payloads.
- *  - `code`    — stable, SCREAMING_SNAKE_CASE, grouped by domain prefix.
- *                Treat the enum as a public API contract: never repurpose
- *                a shipped value, only add new ones (and deprecate old).
- *  - `details` — optional, machine-readable extras (`{ field, retryAfter,
- *                plaudStatus }`). Whitelist named fields only — never
- *                splat in upstream objects, they may carry secrets.
+ * Contract:
+ *   - `error`   safe to display; no stack traces, secrets, or upstream payloads.
+ *   - `code`    stable SCREAMING_SNAKE_CASE; the enum is a public API contract,
+ *               never repurpose a shipped value.
+ *   - `details` whitelisted machine-readable extras only; never splat
+ *               upstream objects, they may carry secrets.
  *
- * Status codes mirror `AppError.statusCode`:
- *   400 invalid input · 401 unauthenticated · 403 forbidden · 404 not found
- *   409 conflict · 413 too large · 416 range invalid · 429 rate limited
- *   502 upstream broken (Plaud, AI provider) · 500 our bug
- *
- * See `docs/error-codes.md` for the full per-code reference.
+ * Status codes mirror `AppError.statusCode`. See `docs/error-codes.md`
+ * for the full per-code reference.
  */
 
 import { NextResponse } from "next/server";
@@ -107,11 +99,8 @@ export interface AppErrorJSON {
 
 /**
  * Application error with machine-readable code + intended HTTP status.
- *
- * Always throw `AppError` (not plain `Error`) from helpers reachable by
- * route handlers. The `errorResponse` / `apiHandler` machinery preserves
- * the code/status verbatim — plain `Error`s fall through `mapErrorToAppError`
- * and end up as a generic 500.
+ * Always throw `AppError` from helpers reachable by route handlers;
+ * plain `Error`s fall through `mapErrorToAppError` to a generic 500.
  */
 export class AppError extends Error {
     constructor(
@@ -133,10 +122,7 @@ export class AppError extends Error {
     }
 }
 
-/**
- * Legacy helper kept for backwards compatibility with older callers.
- * New code should prefer `errorResponse` or `apiHandler`.
- */
+/** Legacy helper; new code should use `errorResponse` or `apiHandler`. */
 export function createErrorResponse(error: AppError | Error | unknown): {
     body: AppErrorJSON;
     status: number;
@@ -145,10 +131,7 @@ export function createErrorResponse(error: AppError | Error | unknown): {
     return { body: app.toJSON(), status: app.statusCode };
 }
 
-/**
- * Return a `NextResponse` carrying the unified error envelope. This is the
- * one-line catch-block helper for routes that don't use `apiHandler`.
- */
+/** One-line catch-block helper for routes not wrapped in `apiHandler`. */
 export function errorResponse(error: AppError | Error | unknown): NextResponse {
     const app = mapErrorToAppError(error);
     if (app.statusCode >= 500) {
@@ -164,25 +147,10 @@ type RouteHandler<Ctx> = (
 ) => Promise<Response> | Response;
 
 /**
- * Wrap a route handler with unified error handling.
- *
- *     export const POST = apiHandler(async (request) => { ... });
- *
- * The wrapper:
- *   - lets `Response`s pass through unchanged (success path, redirects)
- *   - catches anything thrown, runs it through `mapErrorToAppError`, and
- *     returns the unified envelope with the right status code
- *   - logs `>=500` errors via `console.error` (Sentry hook can wire in
- *     here later — `console.error` is already what the codebase uses
- *     today, so this is no regression)
- *   - never lets internal `Error.message` leak: unmapped errors fall back
- *     to `INTERNAL_ERROR` with a generic public message.
- *
- * Routes do not pass a default code: unmapped failures are always
- * `INTERNAL_ERROR` (500). Domain-specific codes must be carried by the
- * thrown `AppError` itself — a 500 labeled `AI_PROVIDER_API_ERROR` would
- * mislead clients into thinking the provider failed when really our
- * handler crashed.
+ * Wrap a route handler so thrown errors become the unified envelope.
+ * Logs `>=500` failures. Unmapped errors map to `INTERNAL_ERROR` with
+ * a generic message — raw `Error.message` is never reflected to the
+ * client. Domain-specific codes must travel on the thrown `AppError`.
  */
 export function apiHandler<Ctx = unknown>(
     handler: RouteHandler<Ctx>,
@@ -202,19 +170,9 @@ export function apiHandler<Ctx = unknown>(
 }
 
 /**
- * Generate a short, quotable correlation id and attach it to `app.details`
- * so it appears in the JSON envelope. In-memory only — the value
- * correlates a user-reported error with a single log line within a single
- * process. Format: `err_` + 8 hex chars from `crypto.randomUUID()`.
- *
- * Only call on 5xx — 4xx responses are already actionable and an errorId
- * would just add noise. Returns the id so the log line can include it.
- *
- * Idempotent: if the same `AppError` instance flows through this function
- * twice (e.g. a route uses `errorResponse` in a `catch` and the same
- * instance later reaches `apiHandler`), the existing id is preserved so
- * the response envelope and log line agree. Re-stamping would silently
- * desync them.
+ * Stamp a short correlation id (`err_` + 8 hex) onto `app.details` and
+ * return it. Idempotent: re-runs preserve the existing id so the
+ * envelope and the log line stay in sync.
  */
 function attachErrorId(app: AppError): string {
     const existing = app.details?.errorId;
@@ -227,19 +185,10 @@ function attachErrorId(app: AppError): string {
 }
 
 /**
- * Map an arbitrary thrown value into an `AppError`.
- *
- * Order of preference:
- *   1. `AppError` — passed through verbatim (this is the path we want
- *      every helper to land on going forward).
- *   2. Known string patterns from third-party libs we can't change
- *      (drizzle "unique"/"duplicate", legacy "Plaud API error" strings,
- *      SMTP, storage, transcription, path traversal). Kept as a fallback
- *      so partially-migrated code still maps to a sensible code.
- *   3. Anything else → `INTERNAL_ERROR` with a generic message. The
- *      original `Error.message` is intentionally NOT placed in the
- *      response — internal stack traces / DB errors / provider secrets
- *      must not leak. Use server logs for the original.
+ * Map an arbitrary thrown value into an `AppError`. `AppError` passes
+ * through verbatim; known string patterns from third-party libs map to
+ * domain codes; everything else falls through to `INTERNAL_ERROR` with
+ * a generic message (raw `Error.message` is never reflected).
  */
 export function mapErrorToAppError(error: unknown): AppError {
     if (error instanceof AppError) {
@@ -247,19 +196,10 @@ export function mapErrorToAppError(error: unknown): AppError {
     }
 
     if (error instanceof Error) {
-        // Note: raw `SyntaxError`s (from `JSON.parse`, `Response.json()`,
-        // or `Request.json()`) are NOT auto-mapped here. The two callers
-        // are indistinguishable at the error level — a malformed *upstream*
-        // body (HTML challenge page) and a malformed *client* request body
-        // throw the identical exception shape — so any blanket mapping
-        // mis-classifies one of them. Helpers that read upstream JSON must
-        // wrap parsing themselves (see `safeParseJson` in
-        // `src/lib/plaud/parse.ts`) and throw a typed `AppError`
-        // (`UPSTREAM_BAD_RESPONSE`, `PLAUD_API_ERROR`, ...) before it
-        // reaches this layer. Route handlers reading client bodies must
-        // `.catch(() => null)` and surface `MISSING_REQUIRED_FIELD` /
-        // `INVALID_INPUT`. Anything that still escapes is genuinely
-        // unmapped and falls through to `INTERNAL_ERROR` (500) below.
+        // Raw `SyntaxError`s from JSON parsing are NOT auto-mapped:
+        // upstream-body and client-body parse failures share the same
+        // exception shape, so a blanket mapping mis-classifies one.
+        // Callers wrap parsing themselves and throw typed `AppError`s.
 
         if (error.message.includes("path traversal")) {
             return new AppError(
@@ -269,11 +209,8 @@ export function mapErrorToAppError(error: unknown): AppError {
             );
         }
 
-        // Postgres SQLSTATE 23505 = unique_violation. node-postgres /
-        // postgres-js / drizzle all surface the underlying pg error with
-        // its `code` property intact (sometimes via `.cause`). Prefer the
-        // typed signal; fall back to substring matching only for adapters
-        // that wrap the original error.
+        // Postgres SQLSTATE 23505 = unique_violation. Prefer the typed
+        // `code`/`cause.code`; substring match is a fallback for wrappers.
         const pgCode = (error as { code?: unknown; cause?: { code?: unknown } })
             .code;
         const causeCode = (error as { cause?: { code?: unknown } }).cause?.code;
@@ -290,10 +227,8 @@ export function mapErrorToAppError(error: unknown): AppError {
             );
         }
 
-        // Legacy `Plaud API error (NNN): ...` / `Plaud API error: ...`
-        // strings. Phase-2 helpers throw `AppError` directly and bypass
-        // this branch entirely; this remains as a safety net for any
-        // un-migrated callsite.
+        // Legacy `Plaud API error (NNN): ...` strings. Safety net for
+        // any un-migrated callsite; current helpers throw `AppError`.
         if (error.message.includes("Plaud API error")) {
             const match = /^Plaud API error \((\d{3})\):/.exec(error.message);
             if (match) {
@@ -319,8 +254,7 @@ export function mapErrorToAppError(error: unknown): AppError {
                     { plaudStatus: status },
                 );
             }
-            // Bare `Plaud API error: ...` — business-level (HTTP 200 with
-            // status:-N), user-actionable.
+            // Bare `Plaud API error: ...` (business-level, HTTP 200).
             return new AppError(
                 ErrorCode.PLAUD_API_ERROR,
                 error.message.replace(/^Plaud API error:\s*/, ""),
@@ -367,9 +301,7 @@ export function mapErrorToAppError(error: unknown): AppError {
         }
     }
 
-    // Unmapped: do NOT reflect the raw message — generic public message,
-    // log internally for diagnosis. Always INTERNAL_ERROR; domain-specific
-    // codes must travel on the thrown `AppError` itself.
+    // Unmapped: generic public message, never leak raw `Error.message`.
     return new AppError(
         ErrorCode.INTERNAL_ERROR,
         "An unexpected error occurred",

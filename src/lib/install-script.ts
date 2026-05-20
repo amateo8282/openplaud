@@ -2,14 +2,12 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 /**
- * Loads `scripts/install.sh` from disk and substitutes `{{VERSION}}` with
- * the requested version tag. Source of truth is the file in the repo —
- * both `/install.sh` and `/[version]/install.sh` route through this.
+ * Render `scripts/install.sh` with `{{VERSION}}` substituted.
  *
- * The standalone Next.js output excludes files outside the build graph,
- * so `next.config.ts` declares `outputFileTracingIncludes` for both
- * routes pointing at `scripts/install.sh`. Without that, this read fails
- * at runtime in the Docker image.
+ * The standalone Next.js output excludes files outside the build graph;
+ * `next.config.ts` must declare `outputFileTracingIncludes` for both
+ * `/install.sh` and `/[version]/install.sh` so this read succeeds in
+ * the Docker image.
  */
 
 const VERSION_RE = /^v\d+\.\d+\.\d+$/;
@@ -29,19 +27,13 @@ export function isValidVersionTag(value: string): boolean {
 
 export async function renderInstallScript(version: string): Promise<string> {
     const script = await loadScript();
-    // Replace every occurrence of the placeholder so the rendered script
-    // can reference the version more than once if we ever need to.
     return script.replaceAll("{{VERSION}}", version);
 }
 
 /**
- * Resolve the latest release tag from GitHub. Cached at the fetch layer
- * for 5 minutes so we don't blow through the unauthenticated 60 req/hr
- * rate limit on the API.
- *
- * Falls back to `null` on any failure — callers should substitute a
- * sensible default (e.g. the version baked into package.json at build
- * time) rather than 500.
+ * Latest release tag from GitHub. Cached for 5 min via Next's fetch
+ * cache (unauthenticated GitHub limit is 60 req/hr). Returns `null` on
+ * any failure — callers should fall back to a baked-in default.
  */
 export async function fetchLatestReleaseTag(): Promise<string | null> {
     try {

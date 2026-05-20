@@ -1,15 +1,10 @@
 /**
- * Client-side helper for the unified API error envelope.
- *
- * The server (`src/lib/errors.ts` + `apiHandler`) returns:
+ * Client-side helper for the unified API error envelope:
  *
  *     { error: string, code: ErrorCode, details?: Record<string, unknown> }
  *
- * on every failure. Use these helpers from React components / hooks /
- * the future mobile app so we never go back to string-matching on the
- * human-readable `error` field. Switch on `code` instead.
- *
- * See `docs/error-codes.md` for the full code reference.
+ * Callers must switch on `code`, never on the human-readable `error`.
+ * See `docs/error-codes.md` for the code reference.
  */
 
 import { toast } from "sonner";
@@ -23,11 +18,9 @@ export interface ApiErrorBody {
 }
 
 /**
- * Parse a non-OK `Response` into the unified error envelope. Tolerant of
- * upstream proxies that occasionally drop the JSON body or replace it with
- * HTML (5xx error pages from a load balancer, etc.) — falls back to a
- * synthetic envelope so the caller always has `{ error, code }` to switch
- * on.
+ * Parse a non-OK `Response` into the unified envelope. Always returns
+ * `{ error, code }`; falls back to a synthetic envelope when an
+ * upstream proxy replaces the body with non-JSON.
  */
 export async function parseApiError(response: Response): Promise<ApiErrorBody> {
     try {
@@ -52,10 +45,7 @@ export async function parseApiError(response: Response): Promise<ApiErrorBody> {
     };
 }
 
-/**
- * Sugar for the common case: "I just want a string to show in a toast."
- * Always returns a non-empty string.
- */
+/** Returns a non-empty error string for toast display. */
 export async function getApiErrorMessage(
     response: Response,
     fallback = "Request failed",
@@ -65,30 +55,17 @@ export async function getApiErrorMessage(
 }
 
 export interface ToastApiErrorOptions {
-    /** Fallback message if the server didn't send a human-readable `error`. */
+    /** Fallback message if the server omits a human-readable `error`. */
     fallback?: string;
-    /**
-     * Short label describing what the user was doing when the error fired
-     * ("connect Plaud", "send verification code", ...). Pre-fills the bug
-     * report description so we don't have to guess from the errorId alone.
-     */
+    /** What the user was doing when the error fired (bug-report seed). */
     errorContext?: string;
 }
 
 /**
- * Toast a non-OK API response and — when the server attached an
- * `errorId` (i.e. it was a 5xx through `apiHandler`) — expose a one-click
- * "Report" action that opens a pre-filled GitHub issue with the errorId
- * baked in. For 4xx responses the toast renders without the action.
- *
- * Returns the parsed envelope so callers can still branch on `code` for
- * UI-specific recovery (e.g. routing to the reconnect flow on
- * `PLAUD_INVALID_TOKEN`).
- *
- * The Report action always opens GitHub directly — no dialog — because
- * the toast is a 5-second UI moment and the goal is single-click reporting.
- * Hosted users who prefer email discover the mailto option via the
- * footer "Report a bug" button, which opens the full dialog.
+ * Toast a non-OK API response. When the envelope carries an `errorId`
+ * (5xx through `apiHandler`), surfaces a one-click "Report" action that
+ * opens a pre-filled GitHub issue. Returns the parsed envelope so
+ * callers can branch on `code` for recovery flows.
  */
 export async function toastApiError(
     response: Response,

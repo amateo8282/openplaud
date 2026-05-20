@@ -17,8 +17,8 @@ import {
     warnIfIpAllowlistTrustsXff,
 } from "./ip-allowlist";
 
-// Print a one-time startup warning when an IP allowlist is configured so the
-// operator knows the gate trusts XFF. Idempotent across imports.
+// One-time startup warning if an IP allowlist is configured (gate
+// trusts XFF). Idempotent across imports.
 if (env.IS_HOSTED && env.ADMIN_IP_ALLOWLIST.length > 0) {
     warnIfIpAllowlistTrustsXff(env.ADMIN_IP_ALLOWLIST);
 }
@@ -72,13 +72,9 @@ interface AssertOptions {
 }
 
 /**
- * Lower-level admin gate that returns a discriminated result so callers can
- * distinguish "you're an admin but need to reauth" (=> redirect to
- * /admin/reauth) from "you have no business here" (=> 404).
- *
- * Mutations should NEVER receive 'reauth' -- they 404 on any failure including
- * stale cookies. The layout passes mutation=false; mutation routes pass
- * mutation=true.
+ * Lower-level admin gate returning a discriminated result. Mutations
+ * never receive `'reauth'` and 404 on any failure including stale
+ * cookies.
  */
 async function evaluateAdminGate(
     opts: AssertOptions,
@@ -133,11 +129,9 @@ async function evaluateAdminGate(
     // Mutation handlers additionally require the tighter window.
     if (opts.mutation && !isWithinMutationTtl(payload)) return null;
 
-    // Audit the access. The insert IS awaited so the row is durable
-    // before the request proceeds (an unaudited admin read is a worse
-    // outcome than ~1ms of added latency). The catch ensures a transient
-    // DB hiccup on the audit table never locks an admin out -- we log
-    // and continue, accepting a missed row in that rare case.
+    // Audit the access. Awaited so the row is durable before the
+    // request proceeds. Transient DB failure logs and continues so a
+    // hiccup on the audit table can't lock the admin out.
     try {
         await db.insert(adminAuditLog).values({
             adminUserId: session.user.id,
@@ -159,10 +153,9 @@ async function evaluateAdminGate(
 }
 
 /**
- * For server components / page-level use. Returns the admin user on success.
- * On any hard failure (not-an-admin, IP miss, etc.) calls notFound() (=> 404).
- * On a soft failure (no cookie / expired cookie) returns 'reauth' so the
- * caller can `redirect('/admin/reauth?next=...')`.
+ * Server-component admin gate. Hard failures 404; soft failures
+ * (missing/expired elevated cookie) return `'reauth'` so the caller
+ * can redirect to `/admin/reauth?next=...`.
  */
 export async function requireAdminPage(
     opts: Omit<AssertOptions, "mutation">,
@@ -172,10 +165,7 @@ export async function requireAdminPage(
     return res;
 }
 
-/**
- * For API routes (read). Returns the admin user. 404s on any failure
- * including stale cookie -- API routes don't redirect.
- */
+/** Read-API admin gate. 404s on any failure (no redirect). */
 export async function requireAdminApi(
     opts: Omit<AssertOptions, "mutation">,
 ): Promise<AdminGuardOk> {
@@ -186,9 +176,7 @@ export async function requireAdminApi(
     return res;
 }
 
-/**
- * For mutation API routes. Stricter TTL. 404s on any failure.
- */
+/** Mutation-API admin gate. Stricter TTL. 404s on any failure. */
 export async function requireAdminMutation(
     opts: Omit<AssertOptions, "mutation">,
 ): Promise<AdminGuardOk> {
@@ -200,9 +188,8 @@ export async function requireAdminMutation(
 }
 
 /**
- * Cheap predicate for nav rendering. Mirrors the first two checks of the gate
- * and the email match -- does NOT verify the elevated cookie. Use to decide
- * whether to show an "Admin" link in the user menu, NOT to authorize anything.
+ * Cheap predicate for nav rendering. Does NOT verify the elevated
+ * cookie — use for showing the Admin link, never to authorise.
  */
 export function isAdminEmail(email: string | null | undefined): boolean {
     if (!env.IS_HOSTED) return false;

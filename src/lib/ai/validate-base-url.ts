@@ -68,29 +68,23 @@ export function validateAiBaseUrl(
 
 function isLoopbackOrUnspecified(host: string): boolean {
     if (host === "localhost") return true;
-    // RFC 6761: `*.localhost` must resolve to loopback. Real-world resolvers
-    // honor it; assume the same on hosted.
+    // RFC 6761: `*.localhost` resolves to loopback.
     if (host.endsWith(".localhost")) return true;
     if (host === "0.0.0.0") return true;
-    // IPv6 loopback / unspecified (URL.hostname has stripped brackets).
     if (host === "::1" || host === "::") return true;
-    // Some parsers leave the zero-compressed forms; be defensive.
     if (host === "0:0:0:0:0:0:0:1" || host === "0:0:0:0:0:0:0:0") return true;
-    // 127.0.0.0/8 — every address in that block is loopback.
+    // 127.0.0.0/8 is entirely loopback.
     if (/^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)) {
         const octets = host.split(".").map(Number);
         if (octets.every((o) => o >= 0 && o <= 255)) return true;
     }
-    // IPv4-mapped IPv6 (`::ffff:a.b.c.d`). WHATWG URL normalizes the embedded
-    // IPv4 to hex (`::ffff:7f00:1`), so check that form. Block the entire
-    // `::ffff:` family routed at loopback (`7f00:0000`–`7fff:ffff`).
+    // IPv4-mapped IPv6 (`::ffff:7f00:0`..`::ffff:7fff:ffff`) covers
+    // loopback after WHATWG normalisation of `::ffff:a.b.c.d`.
     const v4MappedLoopback = /^::ffff:7[0-9a-f]{1,3}:[0-9a-f]{1,4}$/;
     if (v4MappedLoopback.test(host)) {
-        const lastTwoOctets = host.slice("::ffff:".length); // e.g. "7f00:1"
+        const lastTwoOctets = host.slice("::ffff:".length);
         const [hi] = lastTwoOctets.split(":");
         const hiNum = Number.parseInt(hi, 16);
-        // hi is the high two octets of the embedded IPv4. 0x7f00–0x7fff
-        // covers 127.0.0.0/8.
         if (hiNum >= 0x7f00 && hiNum <= 0x7fff) return true;
     }
     return false;

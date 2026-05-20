@@ -1,16 +1,4 @@
-/**
- * Plaud authentication via OTP (email verification code).
- *
- * Flow:
- * 1. POST /auth/otp-send-code { username } → { status, token }
- *    - If status === -302: user's region differs; response includes
- *      data.domains.api with the correct regional API base.
- * 2. POST /auth/otp-login { code, token } → { access_token }
- *
- * Plaud issues long-lived access tokens (~300 day lifetime per decoded JWT
- * claims) and does NOT return a refresh token in the web OTP flow. When the
- * token eventually expires, users re-authenticate via the reconnect UI.
- */
+// OTP-based Plaud authentication. See `docs/architecture/plaud-tokens.md`.
 
 import { AppError, ErrorCode } from "@/lib/errors";
 import { DEFAULT_PLAUD_API_BASE } from "./client";
@@ -18,14 +6,12 @@ import { plaudFetch } from "./fetch";
 import { safeParseJson } from "./parse";
 import { PLAUD_USER_AGENT } from "./servers";
 
-// ── Types ──────────────────────────────────────────────────────────────────
-
 export interface PlaudSendCodeResponse {
     status: number;
     msg: string;
     /** Short-lived JWT to pass back in otp-login */
     token?: string;
-    /** Present when status === -302 (region mismatch) */
+    /** Present when status === -302 (regional redirect). */
     data?: {
         domains?: {
             api?: string;
@@ -36,21 +22,16 @@ export interface PlaudSendCodeResponse {
 export interface PlaudOtpLoginResponse {
     status: number;
     msg: string;
-    /** Tokens can appear at root (observed) or under data (older/region variants) */
+    /** Tokens may appear at root or nested under `data` across regions. */
     access_token?: string;
     data?: {
         access_token?: string;
     };
 }
 
-// ── API calls ──────────────────────────────────────────────────────────────
-
 /**
- * Send a one-time verification code to the user's email.
- *
- * Returns the OTP session token on success.
- * If the user belongs to a different region, returns the correct API base
- * so the caller can retry against the right server.
+ * Send a one-time verification code to the user's email. Transparently
+ * follows up to `MAX_REGION_REDIRECTS` regional redirects (`status === -302`).
  */
 const MAX_REGION_REDIRECTS = 3;
 
@@ -72,13 +53,9 @@ export async function plaudSendCode(
         body: JSON.stringify({ username: email }),
     });
 
-    // Use `safeParseJson` so a Cloudflare HTML challenge body (which
-    // Plaud returns on WAF rejection) surfaces as a typed `PLAUD_API_ERROR`
-    // / `PLAUD_UPSTREAM_ERROR` instead of a raw `SyntaxError` that
-    // `apiHandler` would flatten to `INTERNAL_ERROR` (500). See #142.
     const body = await safeParseJson<PlaudSendCodeResponse>(res);
 
-    // Region mismatch → retry against the correct regional server
+    // Regional redirect → retry against the correct regional server.
     if (body.status === -302 && body.data?.domains?.api) {
         if (_redirectCount >= MAX_REGION_REDIRECTS) {
             throw new AppError(
@@ -103,9 +80,7 @@ export async function plaudSendCode(
     return { token: body.token, apiBase };
 }
 
-/**
- * Verify the OTP code and obtain the access token.
- */
+/** Verify the OTP code and obtain the access token. */
 export async function plaudVerifyOtp(
     code: string,
     otpToken: string,
@@ -124,7 +99,6 @@ export async function plaudVerifyOtp(
 
     const body = await safeParseJson<PlaudOtpLoginResponse>(res);
 
-    // Tokens can appear at root or nested under data
     const accessToken =
         body.access_token ?? body.data?.access_token ?? undefined;
 
@@ -140,18 +114,10 @@ export async function plaudVerifyOtp(
     return { accessToken };
 }
 
-// ── JWT helpers (UX-only; not security boundaries) ────────────────────────
-
 /**
- * Decode a Plaud access token's `exp` claim without verifying the signature.
- *
- * Plaud's user tokens are JWTs with a ~300-day lifetime. We only decode here
- * to give the paste-token UI a friendly hint ("this token expires in 3 days")
- * — actual validation always happens by hitting Plaud's /device/list. Never
- * trust the decoded payload for any security decision.
- *
- * Returns `null` on any malformed input rather than throwing — callers treat
- * a null result as "unknown expiry, let Plaud decide".
+ * Decode a Plaud access token's `exp` claim without verifying signature.
+ * UX-only; never use the decoded payload for any security decision.
+ * Returns `null` on any malformed input.
  */
 export function decodeAccessTokenExpiry(token: string): Date | null {
     if (typeof token !== "string") return null;
@@ -177,15 +143,10 @@ export function decodeAccessTokenExpiry(token: string): Date | null {
 }
 
 /**
- * Best-effort fetch of /user/me to derive the linked Plaud account email.
- *
- * Used only by the paste-token connect flow, which doesn't otherwise know
- * the user's Plaud email. Returns `null` on any failure — the email is a
- * UX nicety (it shows up in settings as "Connected as foo@bar.com"), not
- * a correctness requirement, and plaud_connections.plaud_email is nullable.
- *
- * Same SSRF posture as the rest of this module: caller must have already
- * passed `apiBase` through `isValidPlaudApiUrl`.
+ * Best-effort fetch of /user/me to derive the linked Plaud email.
+ * Returns `null` on any failure — UX nicety, not a correctness requirement.
+ * SSRF posture: caller must validate `apiBase` via `isValidPlaudApiUrl`
+ * before invoking.
  */
 export async function fetchPlaudUserMeEmail(
     accessToken: string,
@@ -206,8 +167,7 @@ export async function fetchPlaudUserMeEmail(
             data?: { email?: unknown };
             email?: unknown;
         };
-        // Tolerate both root-level and data-nested shapes (Plaud's response
-        // shape varies across endpoints/regions).
+        // Root-level vs data-nested shape varies across regions.
         const raw =
             (typeof body.email === "string" && body.email) ||
             (typeof body.data?.email === "string" && body.data.email) ||

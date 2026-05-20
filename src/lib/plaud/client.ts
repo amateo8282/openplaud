@@ -20,20 +20,15 @@ export const DEFAULT_PLAUD_API_BASE = PLAUD_SERVERS[DEFAULT_SERVER_KEY].apiBase;
 const MAX_RETRIES = 3;
 const INITIAL_RETRY_DELAY = 1000; // 1 second
 
-/**
- * Sleep for specified milliseconds
- */
 function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
- * Map a Plaud HTTP failure to a structured `AppError`.
- *
- *   - 401 → PLAUD_INVALID_TOKEN (token revoked/expired — reconnect path)
- *   - 4xx → PLAUD_API_ERROR (user-actionable, surfaced as 400)
- *   - 5xx → PLAUD_UPSTREAM_ERROR (Plaud's problem, surfaced as 502; we
- *           only end up here after MAX_RETRIES of exponential backoff)
+ * Map a Plaud HTTP failure to a structured `AppError`:
+ *   401 → PLAUD_INVALID_TOKEN (reconnect path)
+ *   4xx → PLAUD_API_ERROR (surfaced as 400)
+ *   5xx → PLAUD_UPSTREAM_ERROR (surfaced as 502, after MAX_RETRIES).
  */
 function plaudHttpError(status: number, msg: string): AppError {
     if (status === 401) {
@@ -58,28 +53,9 @@ function plaudHttpError(status: number, msg: string): AppError {
 }
 
 /**
- * Plaud API Client
- * Handles all communication with Plaud API.
- *
- * Plaud uses a two-tier token model:
- *   - **UT** (User Token, ~300 day lifetime): returned by /auth/otp-login,
- *     stored encrypted in plaud_connections.bearer_token. Authenticates
- *     /user/me and the workspace-token mint endpoints.
- *   - **WT** (Workspace Token, 24h lifetime): minted from a UT, required by
- *     recording endpoints (/file/simple/web, /device/list, /file/temp-url/*,
- *     /filetag/, ...). On regional servers (EU, APAC) a UT sent to those
- *     endpoints returns HTTP 200 with an empty list — i.e. it silently fails
- *     open. That's the bug behind issue #66.
- *
- * The client takes a UT in its constructor and lazily mints a WT the first
- * time an authenticated request is made. The WT is cached on the client
- * instance for its lifetime; sync runs are short and the WT is good for 24h
- * so no refresh logic is needed.
- *
- * If the WT mint fails entirely (e.g. global servers historically didn't
- * require it), the client falls back to using the UT directly. This preserves
- * pre-fix behavior for any server that still accepts the UT on recording
- * endpoints.
+ * Plaud API client. Takes a UT in its constructor and lazily mints a WT
+ * for recording endpoints; falls back to the UT directly if the mint
+ * fails. See `docs/architecture/plaud-tokens.md`.
  */
 export class PlaudClient {
     private readonly userToken: string;
@@ -100,26 +76,22 @@ export class PlaudClient {
     }
 
     /**
-     * The currently-known workspace ID for this connection. Populated either
-     * by the constructor (cache hit) or after the first authenticated request
-     * (cache empty / cache stale). Callers persist this back to the DB when
-     * it differs from what they passed in.
+     * Currently-known workspace ID. Populated by the constructor (cache
+     * hit) or after the first authenticated request. Callers persist
+     * this back to the DB when it differs from what they passed in.
      */
     get workspaceId(): string | undefined {
         return this.resolvedWorkspaceId;
     }
 
-    /**
-     * Whether this client fell back to using the UT directly because the WT
-     * mint failed. Useful for diagnostics.
-     */
+    /** Whether this client fell back to the UT because WT mint failed. */
     get usingUserTokenFallback(): boolean {
         return this.workspaceFallbackToUt;
     }
 
     /**
-     * Lazily ensure a workspace token is available. Concurrent callers share
-     * a single in-flight resolution so we don't mint multiple WTs per client.
+     * Lazily ensure a workspace token is available. Concurrent callers
+     * share a single in-flight resolution so we don't mint multiple WTs.
      */
     private async ensureWorkspaceToken(): Promise<void> {
         if (this.workspaceToken || this.workspaceFallbackToUt) return;
@@ -143,10 +115,8 @@ export class PlaudClient {
             this.workspaceToken = workspaceToken;
             this.resolvedWorkspaceId = workspaceId;
         } catch (err) {
-            // Last-resort fallback: use the UT directly. Preserves pre-fix
-            // behavior for any server / legacy account where the UT still
-            // works on recording endpoints. Logged so the dev info endpoint
-            // can surface it.
+            // Fall back to the UT directly. Logged so the dev info
+            // endpoint can surface that the connection is in fallback.
             console.warn(
                 "[plaud] workspace token mint failed, falling back to user token:",
                 err instanceof Error ? err.message : err,
@@ -156,7 +126,9 @@ export class PlaudClient {
     }
 
     /**
-     * Make authenticated request to Plaud API with retry logic
+     * Authenticated request with retry on 429 (honours Retry-After), 5xx,
+     * and `TypeError` from fetch. Up to `MAX_RETRIES` attempts with
+     * exponential backoff.
      */
     private async request<T>(
         endpoint: string,
@@ -218,13 +190,6 @@ export class PlaudClient {
                 throw plaudHttpError(response.status, upstreamMsg);
             }
 
-            // Use `safeParseJson` instead of bare `.json()` so an HTML
-            // body (Cloudflare challenge after a future WAF tightening)
-            // surfaces as a typed Plaud error rather than a raw
-            // `SyntaxError`. The outer `try/catch` below would catch the
-            // `SyntaxError` and map it to `PLAUD_UPSTREAM_ERROR` anyway,
-            // but `safeParseJson` produces the correct code+message in
-            // one step and includes a body snippet in `details`.
             return await safeParseJson<T>(response);
         } catch (error) {
             if (
@@ -238,12 +203,9 @@ export class PlaudClient {
             }
 
             if (error instanceof AppError) throw error;
-            // Plain Error here means: fetch threw past our retry budget
-            // (network blow-up, DNS failure, AbortError) or response.json()
-            // failed parsing an unexpected body. Either way, this is an
-            // upstream / infra problem — surface it as PLAUD_UPSTREAM_ERROR
-            // (502) rather than letting apiHandler downgrade it to a generic
-            // INTERNAL_ERROR (500), which would mislead clients.
+            // Network blow-up / DNS / AbortError past the retry budget,
+            // or a body that failed parsing. Surface as PLAUD_UPSTREAM_ERROR
+            // rather than letting apiHandler downgrade to INTERNAL_ERROR.
             throw new AppError(
                 ErrorCode.PLAUD_UPSTREAM_ERROR,
                 "Failed to communicate with Plaud. Please try again later.",
@@ -252,18 +214,14 @@ export class PlaudClient {
         }
     }
 
-    /**
-     * List all devices associated with the account
-     */
     async listDevices(): Promise<PlaudDeviceListResponse> {
         return this.request<PlaudDeviceListResponse>("/device/list");
     }
 
     /**
-     * Get all recordings
      * @param skip - Number of recordings to skip
      * @param limit - Maximum number of recordings to return
-     * @param isTrash - Whether to get trashed recordings (0 = active, 1 = trash)
+     * @param isTrash - 0 = active, 1 = trash
      * @param sortBy - Field to sort by (default: edit_time)
      * @param isDesc - Sort in descending order (default: true)
      */
@@ -288,7 +246,6 @@ export class PlaudClient {
     }
 
     /**
-     * Get temporary URL for downloading audio file
      * @param fileId - The recording file ID
      * @param isOpus - Whether to get OPUS format URL (default: true)
      */
@@ -306,7 +263,6 @@ export class PlaudClient {
     }
 
     /**
-     * Download audio file as buffer
      * @param fileId - The recording file ID
      * @param preferOpus - Whether to prefer OPUS format (smaller size)
      */
@@ -321,10 +277,7 @@ export class PlaudClient {
                     ? tempUrlResponse.temp_url_opus
                     : tempUrlResponse.temp_url;
 
-            // Signed-URL host is resource.plaud.ai, which sits on the
-            // same Cloudflare zone as the API — route through the same
-            // proxy machinery so download attempts don't fail with a
-            // Cloudflare 403 after the API call succeeded.
+            // resource.plaud.ai is in the same proxy scope as the API.
             const response = await plaudFetch(downloadUrl);
             if (!response.ok) {
                 throw new AppError(
@@ -338,9 +291,6 @@ export class PlaudClient {
             const arrayBuffer = await response.arrayBuffer();
             return Buffer.from(arrayBuffer);
         } catch (error) {
-            // Pass through structured AppErrors (from getTempUrl's request()
-            // call, or our own throw above). Wrap anything else — typically
-            // a network blow-up before fetch returns — as PLAUD_UPSTREAM_ERROR.
             if (error instanceof AppError) throw error;
             throw new AppError(
                 ErrorCode.PLAUD_UPSTREAM_ERROR,
@@ -350,10 +300,7 @@ export class PlaudClient {
         }
     }
 
-    /**
-     * Test connection to Plaud API
-     * Returns true if bearer token is valid
-     */
+    /** Returns true if the bearer token is accepted by /device/list. */
     async testConnection(): Promise<boolean> {
         try {
             await this.listDevices();
@@ -364,7 +311,6 @@ export class PlaudClient {
     }
 
     /**
-     * Update filename for a recording
      * @param fileId - The recording file ID
      * @param filename - New filename to set
      */
@@ -381,7 +327,6 @@ export class PlaudClient {
 
 export * from "./types";
 
-// Note: `createPlaudClient` (which decrypts a stored bearer token) lives in
-// ./client-factory so importing the PlaudClient class (e.g. from tests)
-// doesn't pull in the encryption / env validation chain. Production callers
-// import it from "@/lib/plaud/client-factory" directly.
+// `createPlaudClient` (which decrypts the stored bearer token) lives in
+// ./client-factory so importing this class from tests doesn't pull in
+// the encryption / env validation chain.

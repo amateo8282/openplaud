@@ -1,61 +1,20 @@
 import { decrypt, encrypt } from "@/lib/encryption";
 
-/**
- * Field-level envelope encryption for user content at rest.
- *
- * Wraps `src/lib/encryption.ts` (AES-256-GCM, server-held `ENCRYPTION_KEY`)
- * with two concerns this layer cares about and the base layer does not:
- *
- *   1. **Versioning.** New ciphertext is prefixed with `v1:` so a future
- *      key-rotation pass can identify ciphertext written under the current
- *      key. The `encrypt()` primitive's pre-existing format
- *      (`iv:authTag:hex`) used for Plaud bearer tokens and AI keys is left
- *      alone — versioning here is opt-in for new content fields.
- *
- *   2. **Legacy-plaintext compatibility.** Content fields (`transcriptions.text`,
- *      `recordings.filename`, `aiEnhancements.summary`, `actionItems`,
- *      `keyPoints`, `userSettings.summaryPrompt`, `titleGenerationPrompt`)
- *      were stored plaintext before this rollout. The read path tolerates
- *      both shapes during the deploy → backfill window. Any value not
- *      matching a known ciphertext shape is returned as-is.
- *
- * Threat model (full discussion in `docs/encryption-at-rest.md`):
- * defends against DB-only compromise — stolen backups, snapshot leaks,
- * read-replica access, SQL-injection that reads but does not execute app
- * code. **Does not** defend against a compromised app server, which holds
- * the key. True zero-knowledge for hosted users is not possible while
- * server-side AI features (transcription, summarization) are part of the
- * product. Self-host is the answer for users who require that.
- */
+// Field-level envelope encryption (AES-256-GCM) over
+// `src/lib/encryption.ts`. Threat model and rollout notes:
+// `docs/encryption-at-rest.md`.
 
 const VERSION_PREFIX = "v1:";
 
-/**
- * Strict shape check for the base `encrypt()` output:
- * `<32 hex>:<32 hex>:<even-length hex>` (16-byte IV : 16-byte tag : ciphertext).
- * A plaintext transcript or filename has effectively zero probability of
- * matching this regex, so we use it to disambiguate legacy-plaintext rows
- * from already-encrypted rows.
- */
-// Trailing ciphertext segment uses `(?:[0-9a-f]{2})*` so it always has an
-// even number of hex chars (each byte is two hex chars; AES-GCM cannot
-// produce an odd-length hex payload). The `*` (not `+`) admits the empty
-// case, since encrypting an empty string is a valid round-trip for
-// nullable text columns that hold `""`. Tightening odd-length to no-match
-// strengthens plaintext-vs-ciphertext discrimination at the wrapper layer
-// and avoids feeding obviously-malformed values into `decrypt()`.
+// Strict shape for the base `encrypt()` output:
+// `<32 hex IV>:<32 hex tag>:<even-length hex ciphertext>`.
+// The trailing `(?:[0-9a-f]{2})*` admits the empty case (encrypting
+// `""` is a valid round-trip) and rejects odd-length hex, which AES-GCM
+// can never produce.
 const RAW_CIPHERTEXT_SHAPE = /^[0-9a-f]{32}:[0-9a-f]{32}:(?:[0-9a-f]{2})*$/i;
 
-/**
- * Strict shape check for the v1 wrapper output: `v1:<raw ciphertext shape>`.
- *
- * We require the full shape after the prefix — not just the prefix — so a
- * legacy plaintext value that happens to begin with `v1:` (e.g. a filename
- * the user typed as `v1: rough draft`) is not misclassified as ciphertext
- * and forwarded into `decrypt()` where it would throw. This is the right
- * place for the check: silently catching a decrypt error elsewhere would
- * hide real corruption / tampering, which AES-GCM is supposed to surface.
- */
+// Match the full shape after the `v1:` prefix so a plaintext that
+// happens to start with `v1:` is not misclassified as ciphertext.
 const V1_CIPHERTEXT_SHAPE = /^v1:[0-9a-f]{32}:[0-9a-f]{32}:(?:[0-9a-f]{2})*$/i;
 
 function isCiphertext(value: string): boolean {
@@ -64,11 +23,8 @@ function isCiphertext(value: string): boolean {
 }
 
 /**
- * Encrypt a string for storage in a `text` column. Output is prefixed with
- * `v1:` so the read path can identify which key/version produced it.
- *
- * Empty strings round-trip cleanly. `null`/`undefined` are passed through
- * to make column-level nullability transparent to callers.
+ * Encrypt a string for storage in a `text` column, prefixed with `v1:`.
+ * Empty strings round-trip; `null`/`undefined` pass through.
  */
 export function encryptText(plaintext: string): string;
 export function encryptText(plaintext: null): null;
@@ -88,14 +44,11 @@ export function encryptText(
  * Decrypt a value read from a `text` column.
  *
  * - `v1:` prefix → strip and decrypt under the current key.
- * - Bare `iv:tag:ct` shape (legacy unversioned ciphertext written by the
- *   base `encrypt()` for Plaud tokens / AI keys, in case any caller
- *   accidentally adopted that shape for content) → decrypt directly.
- * - Anything else → treat as legacy plaintext and return verbatim. This
- *   is the deploy-window compatibility path.
+ * - Bare `iv:tag:ct` shape → decrypt directly.
+ * - Anything else → treat as legacy plaintext and return verbatim.
  *
- * Tampering (valid shape, invalid GCM tag) still raises — that's the
- * AES-GCM authenticator doing its job and we want it loud, not silent.
+ * Tampering (valid shape, invalid GCM tag) raises — AES-GCM is meant
+ * to surface that loud, not silent.
  */
 export function decryptText(value: string): string;
 export function decryptText(value: null): null;
@@ -118,11 +71,9 @@ export function decryptText(
 }
 
 /**
- * jsonb-envelope encryption for fields that historically stored a JSON
- * value (object or array). We keep the column type `jsonb` and store
- * `{ "c": "<v1:...>" }` so the schema does not change. This is option (a)
- * from the rollout plan; option (b) (jsonb → text migration) was rejected
- * to avoid a drizzle migration round-trip.
+ * jsonb-envelope encryption for fields stored as JSON. The column stays
+ * `jsonb` and the value becomes `{ "c": "<v1:…>" }` so the schema does
+ * not change.
  */
 export interface EncryptedJsonEnvelope {
     c: string;
@@ -138,10 +89,8 @@ function isEnvelope(value: unknown): value is EncryptedJsonEnvelope {
     );
 }
 
-// Overload order matters: TypeScript picks the first matching signature, so
-// the more-specific `null` / `undefined` overloads must come before the
-// generic `<T>` one (otherwise calls like `encryptJsonField(null)` resolve
-// to the generic overload and lose the precise `null` return type).
+// Overload order matters: TS picks the first matching signature, so
+// specific `null`/`undefined` overloads must precede the generic `<T>`.
 export function encryptJsonField(value: null): null;
 export function encryptJsonField(value: undefined): undefined;
 export function encryptJsonField<T>(value: T): EncryptedJsonEnvelope;
@@ -157,14 +106,9 @@ export function encryptJsonField<T>(
 }
 
 /**
- * Decrypt a jsonb field. Accepts:
- *   - `{ c: "v1:..." }` envelope → decrypt and JSON.parse.
- *   - Any other JSON value (object, array, primitive) → legacy plaintext,
- *     return verbatim.
- *   - `null`/`undefined` → passthrough.
- *
- * Generic `T` is the *expected* shape; legacy rows are returned as-is and
- * are the caller's existing contract anyway.
+ * Decrypt a jsonb field. Envelope `{ c: "v1:…" }` is decrypted and
+ * `JSON.parse`d; any other JSON shape is treated as legacy plaintext.
+ * `T` is the *expected* shape on the encrypted-write path.
  */
 export function decryptJsonField<T>(value: unknown): T | null {
     if (value === null || value === undefined) return null;
@@ -177,10 +121,7 @@ export function decryptJsonField<T>(value: unknown): T | null {
     return value as T;
 }
 
-/**
- * Predicate exposed for the backfill script: skip rows already in the
- * current ciphertext format so the script is idempotent.
- */
+/** Predicate for the backfill script's idempotency check. */
 export function isEncryptedText(value: string | null | undefined): boolean {
     if (value === null || value === undefined) return false;
     return isCiphertext(value);
