@@ -2,9 +2,9 @@
 
 # 🎙️ OpenPlaud
 
-**Self-hosted AI transcription interface for Plaud Note devices**
+**Self-hosted, open-source software for managing, transcribing, and searching voice recordings, using AI providers you configure**
 
-*Replace Plaud's $20/month AI subscription with your own OpenAI-compatible API keys*
+> *OpenPlaud is an independent open-source project. It is not affiliated with, sponsored by, or endorsed by Plaud Inc. References to Plaud devices in this documentation refer to compatibility with hardware that users already own.*
 
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/typescript-5.0-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)

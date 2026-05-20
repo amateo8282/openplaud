@@ -1,7 +1,7 @@
 {
     "name": "openplaud",
     "version": "0.5.3",
-    "description": "Self-hosted AI transcription interface for Plaud Note devices",
+    "description": "Self-hosted, open-source software for managing, transcribing, and searching voice recordings, using AI providers you configure.",
     "author": "OpenPlaud Contributors",
     "license": "AGPL-3.0",
     "repository": {
