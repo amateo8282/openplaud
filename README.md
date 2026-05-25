@@ -594,6 +594,11 @@ This means:
 - ⚠️ Must open-source any modifications if you run it as a service
 - ⚠️ Must include original license and copyright
 
+## ⚖️ Disclaimer
+
+- **Not affiliated.** OpenPlaud is an independent open-source project. It is not affiliated with, endorsed by, or sponsored by Plaud Inc. or any of its subsidiaries. "Plaud" and related marks are the property of their respective owners and are used here only for descriptive interoperability purposes (nominative fair use).
+- **Third-party devices and services.** OpenPlaud is designed to interoperate with hardware and services from third parties users choose to connect — including recording devices (such as Plaud) and storage and AI providers. Users are solely responsible for complying with the applicable terms of service, acceptable-use policies, and laws governing any third-party device or service they connect to this software.
+
 ## 🙏 Acknowledgments
 
 Originally created by **Perier**. Now developed and maintained by the OpenPlaud community.
