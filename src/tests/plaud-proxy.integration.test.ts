@@ -24,7 +24,7 @@ if (!hasCreds) {
 const describeIntegration = hasCreds ? describe : describe.skip;
 
 const PLAUD_URL =
-    "https://api-euc1.plaud.ai/team-app/workspaces/list?need_personal_workspace=true";
+    "https://api.plaud.ai/team-app/workspaces/list?need_personal_workspace=true";
 
 async function callPlaud(): Promise<Response> {
     return plaudFetch(PLAUD_URL, {

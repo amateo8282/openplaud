@@ -66,9 +66,9 @@ export function shouldProxyPlaud(url: string): boolean {
     }
 }
 
+/** A single proxy selection. `url` contains credentials and must not be logged. */
 export interface SelectedProxy {
     id: string;
-    /** Contains credentials; do not log. */
     url: string;
     label: string;
 }

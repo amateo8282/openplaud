@@ -1,8 +1,4 @@
 import {
-    fetch as impersonateFetch,
-    type BodyInit as WreqBodyInit,
-} from "wreq-js";
-import {
     getPlaudProxyUrl,
     invalidatePlaudProxy,
     type SelectedProxy,
@@ -10,10 +6,17 @@ import {
 } from "./proxy";
 
 const MAX_PROXY_ROTATIONS = 1;
-const IMPERSONATE_BROWSER = "chrome_142" as const;
-const IMPERSONATE_OS = "windows" as const;
+const PLAUD_WEB_ORIGIN = "https://web.plaud.ai";
 
-/** `fetch`-shaped wrapper that routes Plaud-bound requests through the configured proxy. */
+/**
+ * `fetch`-shaped wrapper. When `WEBSHARE_API_KEY` is configured and the URL
+ * targets a Plaud host, routes the request through an HTTP proxy from the
+ * configured pool with one rotation on 403/407. Otherwise behaves as a
+ * pass-through to the global `fetch`.
+ *
+ * Uses the runtime's native `proxy` option so the same TLS stack handles
+ * both proxied and direct requests.
+ */
 export async function plaudFetch(
     url: string,
     init?: RequestInit,
@@ -22,24 +25,23 @@ export async function plaudFetch(
         return fetch(url, init);
     }
 
-    let attempt = 0;
     let currentProxy: SelectedProxy | null = await getPlaudProxyUrl();
     if (!currentProxy) {
         return fetch(url, init);
     }
 
+    const headers = mergeBrowserHeaders(init?.headers);
+
+    let attempt = 0;
     while (true) {
         let response: Response;
         try {
-            response = (await impersonateFetch(url, {
-                method: init?.method,
-                headers: init?.headers as Record<string, string> | undefined,
-                body: init?.body as WreqBodyInit | null | undefined,
-                signal: init?.signal ?? undefined,
+            response = await fetch(url, {
+                ...init,
+                headers,
+                // @ts-expect-error -- Bun extension to RequestInit
                 proxy: currentProxy.url,
-                browser: IMPERSONATE_BROWSER,
-                os: IMPERSONATE_OS,
-            })) as unknown as Response;
+            });
         } catch (err) {
             if (attempt < MAX_PROXY_ROTATIONS) {
                 logProxyEvent(
@@ -50,9 +52,7 @@ export async function plaudFetch(
                 );
                 invalidatePlaudProxy(currentProxy);
                 const next = await getPlaudProxyUrl();
-                if (!next) {
-                    return fetch(url, init);
-                }
+                if (!next) return fetch(url, init);
                 currentProxy = next;
                 attempt += 1;
                 continue;
@@ -72,7 +72,6 @@ export async function plaudFetch(
             );
             invalidatePlaudProxy(currentProxy);
 
-            // Resolve next proxy before draining body; returning a drained Response would break JSON parse downstream.
             const next = await getPlaudProxyUrl();
             if (!next) return response;
             await response.body?.cancel().catch(() => undefined);
@@ -83,6 +82,42 @@ export async function plaudFetch(
 
         return response;
     }
+}
+
+/**
+ * Layer browser-shaped headers under the caller's headers in insertion order.
+ * Caller-provided headers always win.
+ */
+function mergeBrowserHeaders(callerHeaders: HeadersInit | undefined): Headers {
+    const out = new Headers();
+
+    out.append(
+        "sec-ch-ua",
+        '"Google Chrome";v="142", "Chromium";v="142", "Not?A_Brand";v="24"',
+    );
+    out.append("sec-ch-ua-mobile", "?0");
+    out.append("sec-ch-ua-platform", '"Windows"');
+    out.append("accept", "application/json, text/plain, */*");
+    out.append(
+        "user-agent",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
+    );
+    out.append("origin", PLAUD_WEB_ORIGIN);
+    out.append("sec-fetch-site", "same-site");
+    out.append("sec-fetch-mode", "cors");
+    out.append("sec-fetch-dest", "empty");
+    out.append("referer", `${PLAUD_WEB_ORIGIN}/`);
+    out.append("accept-encoding", "gzip, deflate, br, zstd");
+    out.append("accept-language", "en-US,en;q=0.9");
+    out.append("priority", "u=1, i");
+
+    if (callerHeaders) {
+        const incoming = new Headers(callerHeaders);
+        incoming.forEach((value, key) => {
+            out.set(key, value);
+        });
+    }
+    return out;
 }
 
 function logProxyEvent(
@@ -102,5 +137,7 @@ function logProxyEvent(
     );
 }
 
-/** Test-only no-op. */
-export function _resetPlaudFetchForTest(): void {}
+/** Test-only: no-op kept for backward compat with existing test imports. */
+export function _resetPlaudFetchForTest(): void {
+    // Nothing to reset — proxy is now stateless (no agent cache).
+}
