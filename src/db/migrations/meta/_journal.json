@@ -218,6 +218,13 @@
       "when": 1783593085542,
       "tag": "0030_nasty_bloodstorm",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1783618614230,
+      "tag": "0031_goofy_jimmy_woo",
+      "breakpoints": true
     }
   ]
 }

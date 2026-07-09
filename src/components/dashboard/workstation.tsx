@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { CommandPalette } from "@/components/dashboard/command-palette";
+import { PlaudReconnectBanner } from "@/components/dashboard/plaud-reconnect-banner";
 import {
     RecordingList,
     type RecordingListHandle,
@@ -65,6 +66,12 @@ interface WorkstationProps {
     userEmail?: string | null;
     initialSettings: InitialSettings;
     /**
+     * True when Plaud has rejected the stored token (connection row carries
+     * an `invalidatedAt`). Seeds the reconnect banner on first paint; the
+     * live sync result takes over once a sync runs. Server-supplied.
+     */
+    plaudNeedsReconnect: boolean;
+    /**
      * True when running in Riffado's hosted mode (`IS_HOSTED=true`).
      * Forwarded into SettingsDialog so hosted-only UI gating reflects
      * the deployment mode. Server-supplied; never derive client-side.
@@ -96,6 +103,7 @@ export function Workstation({
     isAdmin = false,
     userEmail = null,
     initialSettings,
+    plaudNeedsReconnect,
     isHosted,
 }: WorkstationProps) {
     const { refresh } = useRouter();
@@ -190,6 +198,34 @@ export function Workstation({
     const handleSync = useCallback(async () => {
         await manualSync();
     }, [manualSync]);
+
+    // Prefer the live sync result once we have one; fall back to the
+    // server-rendered flag on first paint (before any sync runs). A
+    // change in `plaudNeedsReconnect` only happens when fresh server
+    // truth arrives (e.g. a `router.refresh()` after another tab's sync
+    // invalidated the token), so it always resets the override rather
+    // than letting a stale client-side result keep masking it.
+    const [reconnectOverride, setReconnectOverride] = useState<boolean | null>(
+        null,
+    );
+    const prevPlaudNeedsReconnect = useRef(plaudNeedsReconnect);
+    useEffect(() => {
+        if (plaudNeedsReconnect !== prevPlaudNeedsReconnect.current) {
+            prevPlaudNeedsReconnect.current = plaudNeedsReconnect;
+            setReconnectOverride(null);
+        }
+    }, [plaudNeedsReconnect]);
+    useEffect(() => {
+        if (typeof lastSyncResult?.needsReconnect === "boolean") {
+            setReconnectOverride(lastSyncResult.needsReconnect);
+        }
+    }, [lastSyncResult]);
+    const showReconnect = reconnectOverride ?? plaudNeedsReconnect;
+
+    const handleReconnected = useCallback(() => {
+        refresh();
+        manualSync();
+    }, [refresh, manualSync]);
 
     // Settings dialog needs the provider list at open-time so the
     // Providers section seeds correctly. Fetching on open (rather
@@ -306,6 +342,11 @@ export function Workstation({
                         onOpenShortcuts={() => setShortcutsOpen(true)}
                     />
 
+                    <PlaudReconnectBanner
+                        show={showReconnect}
+                        onReconnected={handleReconnected}
+                    />
+
                     {visibleRecordings.length === 0 &&
                     pendingUploads.length === 0 ? (
                         <WorkstationEmptyState
@@ -418,6 +459,7 @@ export function Workstation({
                     setSettingsOpen(false);
                     setOnboardingOpen(true);
                 }}
+                onPlaudReconnected={handleReconnected}
             />
 
             <OnboardingDialog
