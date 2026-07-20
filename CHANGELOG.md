@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-20
+
 ### Breaking Changes
 - Upgrading runs migrations `0024` through `0034`. Back up PostgreSQL first. Migration `0024_sour_serpent_society.sql` drops the unused `storage_config` table with `CASCADE`; dump any historical rows before upgrading if they still matter ([#83](https://github.com/riffado/riffado/issues/83)). The remaining billing, export, email, and metering migrations are additive. No new environment variable is required for a normal self-hosted installation.
 
@@ -216,7 +218,8 @@
 - Environment variable validation
 - Path traversal protection
 
-[unreleased]: https://github.com/riffado/riffado/compare/v0.5.6...HEAD
+[unreleased]: https://github.com/riffado/riffado/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/riffado/riffado/compare/v0.5.6...v0.6.0
 [0.5.6]: https://github.com/riffado/riffado/releases/tag/v0.5.6
 [0.5.5]: https://github.com/riffado/riffado/releases/tag/v0.5.5
 [0.5.4]: https://github.com/riffado/riffado/releases/tag/v0.5.4
