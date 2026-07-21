@@ -40,7 +40,14 @@ export default async function AdminBillingPage({
             {/* Overview tiles */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <Tile label="Pro" value={counts.proPlan} />
-                <Tile label="Free/lockout" value={counts.freePlan} />
+                <Tile
+                    label="Free, in grace/transition"
+                    value={counts.freePlanInTransition}
+                />
+                <Tile
+                    label="Free, actually locked out"
+                    value={counts.freePlanLockedOut}
+                />
                 <Tile label="In trial" value={counts.inTrial} />
                 <Tile label="In grace" value={counts.inGrace} />
                 <Tile label="Active subs" value={counts.activeSubscriptions} />

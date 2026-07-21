@@ -31,6 +31,8 @@ describe("admin billing overview", () => {
                     totalUsers: 20,
                     proPlan: 12,
                     freePlan: 8,
+                    freePlanInTransition: 5,
+                    freePlanLockedOut: 3,
                     inTrial: 3,
                     inGrace: 2,
                     foundingMembers: 4,
@@ -69,6 +71,8 @@ describe("admin billing overview", () => {
 
         const overview = await billingOverview();
 
+        expect(overview.counts.freePlanInTransition).toBe(5);
+        expect(overview.counts.freePlanLockedOut).toBe(3);
         expect(overview.counts.activeSubscriptions).toBe(9);
         expect(overview.counts.pastDueSubscriptions).toBe(1);
         expect(overview.counts.cancelPendingSubscriptions).toBe(2);
