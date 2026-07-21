@@ -15,6 +15,7 @@ import { sendNewRecordingBarkNotification } from "@/lib/notifications/bark";
 import { sendNewRecordingEmail } from "@/lib/notifications/email";
 import { createPlaudClient } from "@/lib/plaud/client-factory";
 import {
+    findInlineContent,
     isReady,
     parseSummary,
     parseTranscript,
@@ -682,8 +683,12 @@ async function importPlaudContent(
                     .limit(1);
 
                 if (!existing) {
+                    // Prefer the inline copy (no S3 round-trip, no presign
+                    // expiry, #203); fall back to the presigned link.
+                    const inline = findInlineContent(detail, summary?.data_id);
                     const parsed = parseSummary(
-                        await plaudClient.fetchContentLink(summaryLink),
+                        inline ??
+                            (await plaudClient.fetchContentLink(summaryLink)),
                     );
                     if (parsed.summary.trim()) {
                         await upsertEnhancement({

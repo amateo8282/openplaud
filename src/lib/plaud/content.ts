@@ -6,37 +6,108 @@ import type {
 
 /**
  * Pure parsers for Plaud-native content (`GET /file/detail/{fileId}` →
- * `content_list[]`, plus the presigned-link payloads). No network or client
- * dependency, so they're unit-testable against fixtures.
+ * `content_list[]`, plus the presigned-link / inline payloads). No network or
+ * client dependency, so they're unit-testable against fixtures.
  *
- * The content shapes are reverse-engineered and UNVERIFIED against official
- * Plaud docs (see #204 / Phase 0) — every parser is deliberately defensive and
- * tolerates missing/renamed fields rather than throwing.
+ * Item selection and the summary/envelope shape are validated against a real
+ * captured `/file/detail` response (#204). The transcript *segment* body
+ * (`trans_result.json.gz`) is still UNVERIFIED — `parseTranscript` stays
+ * deliberately defensive until a real transcript payload is captured.
+ *
+ * Observed `content_list` item types: `transaction` (transcript),
+ * `auto_sum_note` (the primary "Summary"), `sum_multi_note` (secondary
+ * template notes), `outline`. The `data_type` strings are not stable, so
+ * selection also matches on the `data_id` prefix
+ * (`source_transaction:` / `auto_sum:` / `sum_multi:`).
  */
 
 const TRANSCRIPT_TYPES = new Set(["transaction", "transcript"]);
-const SUMMARY_TYPES = new Set(["summary", "note", "ai_summary"]);
+const TRANSCRIPT_ID_PREFIXES = ["source_transaction:"];
+// Primary summary first (the "Summary" tab), then secondary template notes.
+const SUMMARY_TYPES = new Set([
+    "auto_sum_note",
+    "sum_multi_note",
+    "summary",
+    "note",
+    "ai_summary",
+]);
+const SUMMARY_ID_PREFIXES = ["auto_sum:", "sum_multi:"];
+const PRIMARY_SUMMARY_ID_PREFIX = "auto_sum:";
+
+function matches(
+    item: PlaudContentItem,
+    types: Set<string>,
+    idPrefixes: string[],
+): boolean {
+    const type = (item.data_type ?? "").toLowerCase();
+    if (types.has(type)) return true;
+    const id = item.data_id ?? "";
+    return idPrefixes.some((p) => id.startsWith(p));
+}
+
+function isPrimarySummary(item: PlaudContentItem): boolean {
+    const type = (item.data_type ?? "").toLowerCase();
+    return (
+        type === "auto_sum_note" ||
+        (item.data_id ?? "").startsWith(PRIMARY_SUMMARY_ID_PREFIX)
+    );
+}
 
 export interface SelectedContent {
     transcript?: PlaudContentItem;
     summary?: PlaudContentItem;
 }
 
-/** First transcript-like and first summary-like item from `content_list`. */
+/**
+ * Pick the transcript and summary items from `content_list`. The transcript
+ * is the first transaction-like item. For summaries we prefer the primary
+ * auto-generated one (`auto_sum_note`) over secondary template notes
+ * (`sum_multi_note`), falling back to whatever summary-like item appears first.
+ */
 export function selectContentItems(
     detail: PlaudFileDetailResponse,
 ): SelectedContent {
     const items = detail.data?.content_list ?? [];
     const selected: SelectedContent = {};
+    let fallbackSummary: PlaudContentItem | undefined;
     for (const item of items) {
-        const type = (item.data_type ?? "").toLowerCase();
-        if (!selected.transcript && TRANSCRIPT_TYPES.has(type)) {
+        if (
+            !selected.transcript &&
+            matches(item, TRANSCRIPT_TYPES, TRANSCRIPT_ID_PREFIXES)
+        ) {
             selected.transcript = item;
-        } else if (!selected.summary && SUMMARY_TYPES.has(type)) {
-            selected.summary = item;
+        } else if (matches(item, SUMMARY_TYPES, SUMMARY_ID_PREFIXES)) {
+            if (!selected.summary && isPrimarySummary(item)) {
+                selected.summary = item;
+            } else if (!fallbackSummary) {
+                fallbackSummary = item;
+            }
         }
     }
+    selected.summary ??= fallbackSummary;
     return selected;
+}
+
+/**
+ * Some content (notably the primary `auto_sum` summary) is delivered inline in
+ * `pre_download_content_list[].data_content` as a JSON string, so it can be
+ * imported without a presigned-S3 round-trip (and without risking presign
+ * expiry, #203). Returns the parsed inline payload for a content item, or
+ * `undefined` when there is no inline copy.
+ */
+export function findInlineContent(
+    detail: PlaudFileDetailResponse,
+    dataId: string | undefined,
+): unknown {
+    if (!dataId) return undefined;
+    const list = detail.data?.pre_download_content_list ?? [];
+    const entry = list.find((e) => e.data_id === dataId);
+    if (!entry || typeof entry.data_content !== "string") return undefined;
+    try {
+        return JSON.parse(entry.data_content);
+    } catch {
+        return entry.data_content;
+    }
 }
 
 /**

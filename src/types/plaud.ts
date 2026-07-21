@@ -95,27 +95,41 @@ export interface PlaudWorkspaceTokenResponse {
 }
 
 // --- Plaud-native content (transcript / summary / notes) — feature #204 ---
-// Shape of GET /file/detail/{fileId}. Reverse-engineered and UNVERIFIED
-// against official Plaud docs (see Phase 0); kept permissive (all fields
-// optional) so parsers defensively pick what they need.
+// Shape of GET /file/detail/{fileId}. Item selection + the summary/envelope
+// shape are validated against a real captured response; the transcript segment
+// body is still unverified. Kept permissive (all fields optional) so parsers
+// defensively pick what they need.
 export interface PlaudContentItem {
-    data_type?: string; // 'transaction' | 'summary' | 'note' | 'outline' | 'mindmap' | ...
+    // Stable-ish per-item id, e.g. 'source_transaction:<...>',
+    // 'auto_sum:<...>', 'sum_multi:<...>'. Used for selection when the
+    // free-text `data_type` strings drift.
+    data_id?: string;
+    data_type?: string; // 'transaction' | 'auto_sum_note' | 'sum_multi_note' | 'outline' | ...
+    data_title?: string;
     data_tab_name?: string;
     task_status?: number; // 1 = ready
     data_link?: string; // presigned URL; body may be gzip-compressed JSON
 }
 
+// Inline content delivered with the detail response (no S3 round-trip).
+// `data_content` is a JSON string keyed by the matching item's `data_id`.
+export interface PlaudPreDownloadContent {
+    data_id?: string;
+    data_content?: string;
+}
+
 export interface PlaudFileDetail {
-    id?: string;
-    filename?: string;
+    file_id?: string;
+    file_name?: string;
     duration?: number;
     start_time?: number;
     scene?: number;
     content_list?: PlaudContentItem[];
+    pre_download_content_list?: PlaudPreDownloadContent[];
 }
 
 export interface PlaudFileDetailResponse {
-    status: number;
+    status: number; // 0 = success on this endpoint
     msg?: string;
     data?: PlaudFileDetail;
 }
