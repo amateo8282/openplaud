@@ -59,9 +59,10 @@ export function RegisterForm({ requireEmailVerification }: RegisterFormProps) {
                 name,
                 // Where the auto-sign-in-after-verification redirect lands the
                 // user once they click the emailed link -- matches the
-                // destination used when verification is off, so both paths
-                // funnel through onboarding (Plaud connection) the same way.
-                callbackURL: "/onboarding",
+                // destination used when verification is off. The mandatory
+                // OnboardingDialog (Workstation) takes over from here for
+                // any account that hasn't finished onboarding yet.
+                callbackURL: "/dashboard",
             });
 
             if (result.error) {
@@ -76,7 +77,7 @@ export function RegisterForm({ requireEmailVerification }: RegisterFormProps) {
             }
 
             toast.success("Account created successfully");
-            push("/onboarding");
+            push("/dashboard");
             refresh();
         } catch (error) {
             const message =
@@ -103,7 +104,7 @@ export function RegisterForm({ requireEmailVerification }: RegisterFormProps) {
         try {
             const result = await sendVerificationEmail({
                 email,
-                callbackURL: "/onboarding",
+                callbackURL: "/dashboard",
             });
 
             if (result.error) {

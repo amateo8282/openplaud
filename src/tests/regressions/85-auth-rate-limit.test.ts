@@ -155,7 +155,7 @@ describe("enforceAuthRateLimit", () => {
         const result = await enforceAuthRateLimit(
             authRequest("/send-verification-email", {
                 email: "a@b.com",
-                callbackURL: "/onboarding",
+                callbackURL: "/dashboard",
             }),
         );
 

@@ -175,7 +175,6 @@ describe("decideHostnameGate -- gate active, admin host", () => {
             "/dashboard",
             "/settings",
             "/recordings/abc",
-            "/onboarding",
             "/rebrand",
             "/api/recordings/123",
         ]) {

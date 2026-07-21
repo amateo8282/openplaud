@@ -12,7 +12,6 @@ const HOSTED_DISALLOW = [
     "/api/",
     "/dashboard",
     "/settings",
-    "/onboarding",
     "/recordings/",
     "/admin",
     "/login",
