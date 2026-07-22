@@ -163,6 +163,63 @@ export function resolveCurrency(
     return fallback ?? preferred;
 }
 
+/**
+ * Resolve the monthly display currency in a way that's robust to a
+ * founding-capacity race between when this is called (a display snapshot)
+ * and the eventual checkout submission. Which monthly kind checkout
+ * actually charges (`founding` vs `standard`) is re-checked atomically at
+ * submission time and can differ from `activeMonthlyKind`'s snapshot if
+ * the last founding slot is claimed in between -- so prefer whichever
+ * currency is valid for BOTH kinds, which makes the resolved currency
+ * immune to that race entirely in the common case where an operator
+ * configures the same currencies for both. Only falls through to
+ * `activeMonthlyKind`'s own resolution when the operator has configured
+ * genuinely different currency availability between the two monthly
+ * kinds -- a narrow remaining case still caught by Stripe's hosted
+ * Checkout page, which always shows the final price and currency before
+ * any charge.
+ */
+export function resolveMonthlyDisplayCurrency(
+    country: string | null | undefined,
+    activeMonthlyKind: MonthlyPriceKind,
+): BillingCurrency {
+    const foundingCurrency = resolveCurrency(country, "month", "founding");
+    const standardCurrency = resolveCurrency(country, "month", "standard");
+    if (foundingCurrency === standardCurrency) return foundingCurrency;
+    return activeMonthlyKind === "founding"
+        ? foundingCurrency
+        : standardCurrency;
+}
+
+/**
+ * Resolve the buyer's country from the configured trusted geo header, if
+ * any (`GEO_COUNTRY_HEADER`; unset on instances that haven't wired up an
+ * edge-injected country header, in which case currency always falls back
+ * to `BILLING_DEFAULT_CURRENCY`). Used identically by the checkout route
+ * and every price-DISPLAY surface so what's shown always matches what
+ * Stripe will actually charge.
+ */
+export function resolveRequestCountry(
+    getHeader: (name: string) => string | null,
+): string | null {
+    return env.GEO_COUNTRY_HEADER ? getHeader(env.GEO_COUNTRY_HEADER) : null;
+}
+
+/**
+ * Pick the single price to *display* for a visitor out of a catalog side
+ * that may carry an entry per configured currency. Falls back to whichever
+ * currency IS configured for this tier if the preferred one isn't. Never
+ * join multiple currencies together in copy -- Stripe only ever charges
+ * the buyer one of them, so showing more than one is not a real choice,
+ * just noise.
+ */
+export function pickDisplayPrice(
+    side: Record<BillingCurrency, PublicPrice | null>,
+    preferred: BillingCurrency,
+): PublicPrice | null {
+    return side[preferred] ?? side[preferred === "usd" ? "eur" : "usd"] ?? null;
+}
+
 /** Resolve the price config for a checkout, throwing if that interval has no configured Price. */
 export function resolvePrice(
     country?: string | null,

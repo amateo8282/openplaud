@@ -11,6 +11,7 @@ import {
     Sparkles,
     Trash2,
 } from "lucide-react";
+import { useState } from "react";
 import { TranscribeInBrowserButton } from "@/components/dashboard/transcribe-in-browser-button";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -30,22 +31,62 @@ interface Transcription {
     language?: string;
 }
 
+/** A transcript variant for a single source (Plaud, the user's own, etc.). */
+export interface TranscriptOption {
+    source: string;
+    text: string;
+    language?: string;
+    provider?: string;
+    model?: string;
+}
+
 interface TranscriptionPanelProps {
     recording: Recording;
+    /** Back-compat single transcript. Used only when `transcripts` is absent. */
     transcription?: Transcription;
+    /** All transcripts for the recording, one per source, primary first. When
+     * more than one is present a source switcher is shown. */
+    transcripts?: TranscriptOption[];
     isTranscribing: boolean;
     onTranscribe: () => void;
     /** Refresh handler called after a browser-side transcription completes. */
     onTranscribeComplete?: () => void;
 }
 
+function transcriptSourceLabel(source: string): string {
+    if (source === "plaud") return "Plaud";
+    if (source === "mixed") return "Mix";
+    return "Your provider";
+}
+
 export function TranscriptionPanel({
     recording,
     transcription,
+    transcripts,
     isTranscribing,
     onTranscribe,
     onTranscribeComplete,
 }: TranscriptionPanelProps) {
+    const transcriptList: TranscriptOption[] =
+        transcripts && transcripts.length > 0
+            ? transcripts
+            : transcription?.text
+              ? [
+                    {
+                        source: "riffado",
+                        text: transcription.text,
+                        language: transcription.language,
+                    },
+                ]
+              : [];
+
+    const [activeSource, setActiveSource] = useState<string | undefined>(
+        undefined,
+    );
+    const activeTranscript =
+        transcriptList.find((t) => t.source === activeSource) ??
+        transcriptList[0];
+
     const {
         summaryData,
         isSummarizing,
@@ -57,7 +98,7 @@ export function TranscriptionPanel({
         handleDeleteSummary,
     } = useTranscriptionSummary({
         recordingId: recording?.id,
-        transcriptionText: transcription?.text,
+        transcriptionText: activeTranscript?.text,
     });
 
     return (
@@ -71,7 +112,7 @@ export function TranscriptionPanel({
                             Transcription
                         </CardTitle>
                         <div className="flex items-center gap-2">
-                            {transcription?.text && (
+                            {activeTranscript?.text && (
                                 <Button
                                     onClick={onTranscribe}
                                     size="sm"
@@ -82,7 +123,7 @@ export function TranscriptionPanel({
                                     Re-transcribe
                                 </Button>
                             )}
-                            {!transcription?.text && !isTranscribing && (
+                            {!activeTranscript?.text && !isTranscribing && (
                                 <>
                                     <Button
                                         onClick={onTranscribe}
@@ -120,31 +161,59 @@ export function TranscriptionPanel({
                                 Transcribing audio…
                             </p>
                         </div>
-                    ) : transcription?.text ? (
+                    ) : activeTranscript?.text ? (
                         <div className="space-y-4">
+                            {transcriptList.length > 1 && (
+                                <div className="flex items-center gap-2 border-b pb-2">
+                                    {transcriptList.map((t) => (
+                                        <button
+                                            key={t.source}
+                                            type="button"
+                                            onClick={() =>
+                                                setActiveSource(t.source)
+                                            }
+                                            className={`px-3 py-1 text-xs rounded-md transition-colors ${
+                                                t.source ===
+                                                activeTranscript.source
+                                                    ? "bg-primary text-primary-foreground"
+                                                    : "bg-muted text-muted-foreground hover:text-foreground"
+                                            }`}
+                                        >
+                                            {transcriptSourceLabel(t.source)}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
                             <div className="bg-muted rounded-lg p-4 max-h-96 overflow-y-auto">
                                 <p className="text-sm whitespace-pre-wrap leading-relaxed">
-                                    {transcription.text}
+                                    {activeTranscript.text}
                                 </p>
                             </div>
                             <div className="flex items-center gap-4 text-xs text-muted-foreground pt-2 border-t">
-                                {transcription.language && (
+                                <span className="px-2 py-0.5 rounded bg-muted font-medium">
+                                    {transcriptSourceLabel(
+                                        activeTranscript.source,
+                                    )}
+                                </span>
+                                {activeTranscript.language && (
                                     <div className="flex items-center gap-1">
                                         <Languages className="size-3" />
                                         <span>
-                                            Language: {transcription.language}
+                                            Language:{" "}
+                                            {activeTranscript.language}
                                         </span>
                                     </div>
                                 )}
                                 <div>
-                                    {transcription.text.trim()
-                                        ? transcription.text.trim().split(/\s+/)
-                                              .length
+                                    {activeTranscript.text.trim()
+                                        ? activeTranscript.text
+                                              .trim()
+                                              .split(/\s+/).length
                                         : 0}{" "}
                                     words
                                 </div>
                                 <div>
-                                    {transcription.text.length} characters
+                                    {activeTranscript.text.length} characters
                                 </div>
                             </div>
                         </div>
@@ -160,8 +229,8 @@ export function TranscriptionPanel({
                 </CardContent>
             </Card>
 
-            {/* Summary Card -- only show when transcription exists */}
-            {transcription?.text && (
+            {/* Summary Card -- only show when a transcript exists */}
+            {activeTranscript?.text && (
                 <Card>
                     <CardHeader>
                         <div className="flex items-center justify-between">

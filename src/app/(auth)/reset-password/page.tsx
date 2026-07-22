@@ -2,10 +2,8 @@ import {
     HostedAuthChrome,
     SelfHostAuthChrome,
 } from "@/components/auth/auth-chrome";
-import {
-    ResetPasswordForm,
-    resetPasswordMode,
-} from "@/components/auth/reset-password-form";
+import { ResetPasswordForm } from "@/components/auth/reset-password-form";
+import { resetPasswordMode } from "@/lib/auth/reset-password-mode";
 import { redirectIfAuthenticated } from "@/lib/auth-server";
 import { env } from "@/lib/env";
 

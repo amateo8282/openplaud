@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { MetalButton } from "@/components/metal-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { resetPasswordMode } from "@/lib/auth/reset-password-mode";
 import { resetPassword } from "@/lib/auth-client";
 
 interface ResetPasswordFormProps {
@@ -22,22 +23,10 @@ interface ResetPasswordFormProps {
 }
 
 /**
- * `resetPasswordMode` lets the route compute the right chrome title /
- * subtitle from the same `(token, error)` pair we hand to the form.
- * Keeping the inference in one place avoids drift between route and form.
- */
-export function resetPasswordMode(
-    token: string | undefined,
-    error: string | undefined,
-): "set" | "invalid" {
-    if (!token || error) return "invalid";
-    return "set";
-}
-
-/**
  * Renders only the form body. Page chrome (logo, headings, panel,
- * background) is owned by the route, which uses `resetPasswordMode()` to
- * decide the appropriate title/subtitle.
+ * background) is owned by the route, which uses `resetPasswordMode()`
+ * (from `@/lib/auth/reset-password-mode`) to decide the appropriate
+ * title/subtitle.
  */
 export function ResetPasswordForm({ token, error }: ResetPasswordFormProps) {
     const [password, setPassword] = useState("");

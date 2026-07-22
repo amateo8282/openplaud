@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { Deploy } from "@/components/landing/deploy";
 import { FAQ } from "@/components/landing/faq";
@@ -14,6 +15,11 @@ import { LandingFooter } from "@/components/landing-footer";
 import { getFoundingMemberAvailability } from "@/db/queries/billing";
 import { getSession } from "@/lib/auth-server";
 import { env } from "@/lib/env";
+import {
+    resolveCurrency,
+    resolveMonthlyDisplayCurrency,
+    resolveRequestCountry,
+} from "@/lib/hosted/billing/pricing";
 import { marketingMetadata } from "@/lib/seo/marketing-metadata";
 
 export const metadata: Metadata = marketingMetadata({
@@ -41,14 +47,47 @@ export default async function HomePage() {
     const foundingAvailability = await getFoundingMemberAvailability(
         env.BILLING_FOUNDING_MEMBER_CAPACITY,
     );
+    // Resolved once per tier, the same way checkout resolves it, and passed
+    // down to every price-display section below. Stripe only ever charges a
+    // buyer one currency -- showing "$5 or €5" implies a choice that
+    // doesn't exist, and silently diverging from what checkout will
+    // actually charge is worse. If `GEO_COUNTRY_HEADER` isn't configured on
+    // this deployment, this (correctly) resolves to the same default
+    // currency checkout uses.
+    //
+    // Resolved separately per tier: currency availability can differ
+    // between the founding/standard monthly price and the annual price, so
+    // reusing one resolved value across tiers can disagree with what
+    // `startSubscriptionCheckout` actually resolves for that specific tier.
+    //
+    // The monthly currency goes through `resolveMonthlyDisplayCurrency`,
+    // not a plain `resolveCurrency` call keyed to this snapshot's founding
+    // vs standard kind: which kind checkout actually charges is re-checked
+    // atomically at submission time, so this snapshot can go stale if the
+    // last founding slot is claimed before the user checks out.
+    const requestHeaders = await headers();
+    const country = resolveRequestCountry((name) => requestHeaders.get(name));
+    const activeMonthlyKind =
+        foundingAvailability.remaining > 0 ? "founding" : "standard";
+    const monthlyCurrency = resolveMonthlyDisplayCurrency(
+        country,
+        activeMonthlyKind,
+    );
+    const annualCurrency = resolveCurrency(country, "year", "standard");
 
     return (
         <div className="min-h-screen flex flex-col bg-background text-foreground selection:bg-primary/30 overflow-x-hidden">
-            <HostedProAnnouncementBar availability={foundingAvailability} />
+            <HostedProAnnouncementBar
+                availability={foundingAvailability}
+                currency={monthlyCurrency}
+            />
             <LandingNav />
             <main className="flex-1">
                 <Hero />
-                <TheMath availability={foundingAvailability} />
+                <TheMath
+                    availability={foundingAvailability}
+                    currency={monthlyCurrency}
+                />
                 <Features />
                 {/* TODO: bring back a testimonials slot once we have
                     Riffado-specific quotes. The previous RedditQuotes
@@ -56,9 +95,17 @@ export default async function HomePage() {
                     quotes and was removed for commercial-disparagement
                     risk. Do not reinstate without legal review. */}
                 <ForProfessionals />
-                <Pricing availability={foundingAvailability} />
+                <Pricing
+                    availability={foundingAvailability}
+                    monthlyCurrency={monthlyCurrency}
+                    annualCurrency={annualCurrency}
+                />
                 <Deploy />
-                <FAQ availability={foundingAvailability} />
+                <FAQ
+                    availability={foundingAvailability}
+                    monthlyCurrency={monthlyCurrency}
+                    annualCurrency={annualCurrency}
+                />
                 <FinalCTA />
             </main>
             <LandingFooter />

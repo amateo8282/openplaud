@@ -7,9 +7,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export function OnboardingStepWelcome() {
     return (
-        <div className="space-y-6">
+        <div className="space-y-4">
             <div className="text-center space-y-2">
-                <div className="size-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                <div className="size-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-3">
                     <Mic className="size-8 text-primary" />
                 </div>
                 <h3 className="text-xl font-semibold">
@@ -81,9 +81,9 @@ export function OnboardingStepPlaud({
     onConnected: () => void;
 }) {
     return (
-        <div className="space-y-6">
+        <div className="space-y-4">
             <div className="text-center space-y-2">
-                <div className="size-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                <div className="size-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-3">
                     <Mic className="size-8 text-primary" />
                 </div>
                 <h3 className="text-xl font-semibold">
@@ -119,10 +119,7 @@ export function OnboardingStepPlaud({
             ) : (
                 <Card className="gap-0 py-4">
                     <CardContent className="pt-6">
-                        <PlaudConnectTabs
-                            variant="dialog"
-                            onConnected={onConnected}
-                        />
+                        <PlaudConnectTabs onConnected={onConnected} />
                     </CardContent>
                 </Card>
             )}
@@ -141,9 +138,9 @@ export function OnboardingStepAiProvider({
 }) {
     const includedOnly = hasIncludedProvider && !hasOwnProvider;
     return (
-        <div className="space-y-6">
+        <div className="space-y-4">
             <div className="text-center space-y-2">
-                <div className="size-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                <div className="size-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-3">
                     <Bot className="size-8 text-primary" />
                 </div>
                 <h3 className="text-xl font-semibold">
@@ -229,9 +226,9 @@ export function OnboardingStepComplete({
     hasIncludedProvider: boolean;
 }) {
     return (
-        <div className="space-y-6">
+        <div className="space-y-4">
             <div className="text-center space-y-2">
-                <div className="size-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                <div className="size-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-3">
                     <CheckCircle2 className="size-8 text-primary" />
                 </div>
                 <h3 className="text-xl font-semibold">You're All Set!</h3>

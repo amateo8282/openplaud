@@ -33,6 +33,12 @@ type BillingInterval = "month" | "year";
 
 interface BillingState {
     enabled: boolean;
+    /** Resolved the same way checkout resolves currency, so the pre-purchase
+     * estimate below always matches what Stripe will actually charge.
+     * Resolved separately per tier -- monthly (founding or standard,
+     * whichever is currently active) and annual can have different
+     * configured currency availability. */
+    resolvedCurrency?: { monthly: "usd" | "eur"; annual: "usd" | "eur" };
     plan: "self_host" | "hosted_free" | "hosted_pro";
     planTransitionUntil: string | null;
     foundingMember: boolean;
@@ -117,21 +123,35 @@ function trimAmount(amount: string): string {
     return Number.isFinite(parsed) ? parsed.toString() : amount;
 }
 
+/**
+ * Pick the single price to display out of a catalog side that may carry
+ * an entry per currency, falling back to whichever currency IS configured
+ * if the preferred one isn't. Stripe only ever charges one currency --
+ * never join both together in copy.
+ */
+function pickPrice(
+    catalog: PriceCatalogSide,
+    preferred: "usd" | "eur",
+): CatalogPrice | null {
+    return (
+        catalog[preferred] ??
+        catalog[preferred === "usd" ? "eur" : "usd"] ??
+        null
+    );
+}
+
 function formatProPrice(
     catalog: PriceCatalogSide,
     interval: BillingInterval,
+    preferredCurrency: "usd" | "eur",
 ): string {
     const suffix = interval === "year" ? "/year" : "/month";
-    const parts = [
-        catalog.usd?.displayAmount
-            ? `$${trimAmount(catalog.usd.displayAmount)}${suffix}`
-            : null,
-        catalog.eur?.displayAmount
-            ? `€${trimAmount(catalog.eur.displayAmount)}${suffix}`
-            : null,
-    ].filter(Boolean);
-    if (parts.length > 0) return parts.join(" or ");
-    return interval === "year" ? "Pro annual" : "Pro monthly";
+    const price = pickPrice(catalog, preferredCurrency);
+    if (!price?.displayAmount) {
+        return interval === "year" ? "Pro annual" : "Pro monthly";
+    }
+    const symbol = price.currency === "usd" ? "$" : "€";
+    return `${symbol}${trimAmount(price.displayAmount)}${suffix}`;
 }
 
 /** Mirrored Stripe interval ("1 month", "1 year") to a display suffix. */
@@ -547,9 +567,14 @@ export function BillingSection() {
                 ? "year"
                 : "month";
 
+    const preferredCurrency =
+        (effectiveInterval === "year"
+            ? state.resolvedCurrency?.annual
+            : state.resolvedCurrency?.monthly) ?? "usd";
     const proPrice = formatProPrice(
         effectiveInterval === "year" ? state.pricing.annual : monthlyCatalog,
         effectiveInterval,
+        preferredCurrency,
     );
     const foundingAvailability = state.pricing.monthly.foundingAvailability;
     const proPriceNote =
