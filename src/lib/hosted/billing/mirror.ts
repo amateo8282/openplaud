@@ -10,6 +10,7 @@ import {
     getUserActivitySummary,
     markEverPaid,
     releaseFoundingMemberReservation,
+    SubscriptionUserConflictError,
     scheduleAccountDeletion,
     setUserPlan,
     upsertSubscription,
@@ -133,7 +134,7 @@ export async function mirrorStripeSubscription(
 
     const billingCountry = await resolveBillingCountry(n.stripeCustomerId);
 
-    await upsertSubscription({
+    const subscriptionRow = {
         id: n.id,
         userId,
         stripeCustomerId: n.stripeCustomerId,
@@ -149,7 +150,26 @@ export async function mirrorStripeSubscription(
         canceledAt: n.canceledAt,
         withdrawalWaiverAcceptedAt: n.withdrawalWaiverAcceptedAt,
         metadata: sub,
-    });
+    };
+
+    try {
+        await upsertSubscription(subscriptionRow);
+    } catch (error) {
+        if (!(error instanceof SubscriptionUserConflictError)) throw error;
+        // Webhooks for two subscriptions on the same customer can arrive out
+        // of order: the user's previously-active subscription hasn't been
+        // mirrored as canceled/superseded yet, so it's still occupying the
+        // one-live-subscription-per-user slot. Re-fetch it from Stripe (the
+        // source of truth) and re-mirror it, then retry once. If Stripe
+        // genuinely reports two live subscriptions for this customer, the
+        // retry fails again and this throws for real -- that needs manual
+        // investigation, not a silent workaround.
+        console.warn(
+            `[billing-mirror] subscription ${n.id} conflicts with locally-active ${error.conflictingSubscriptionId} for user ${userId}; re-mirroring the stale one before retrying`,
+        );
+        await mirrorSubscriptionById(error.conflictingSubscriptionId);
+        await upsertSubscription(subscriptionRow);
+    }
 
     const planEntry = entitlementsForSubscription({
         status: n.status,
